@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PixelFill" />
+  <meta name="theme-color" content="#0f0f14" />
+  <title>PixelFill</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f14;
+      --surface: #1a1a24;
+      --border: #2a2a3a;
+      --text: #e8e8f0;
+      --muted: #5a5a7a;
+      --accent: #7c6fff;
+      --accent2: #ff6fb0;
+      --success: #6fffa0;
+      --cell-size: 32px;
+      --palette-h: 120px;
+      --header-h: 60px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    /* ── HEADER ── */
+    #header {
+      height: var(--header-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: relative;
+      z-index: 10;
+    }
+    #logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #progress-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+    #progress-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #progress-bar-bg {
+      width: 120px;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    /* ── CANVAS AREA ── */
+    #canvas-wrap {
+      position: absolute;
+      top: var(--header-h);
+      bottom: var(--palette-h);
+      left: 0; right: 0;
+      overflow: hidden;
+      cursor: grab;
+    }
+    #canvas-wrap.grabbing { cursor: grabbing; }
+
+    #canvas-inner {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform-origin: center center;
+      /* JS controls transform */
+    }
+
+    /* ── GRID ── */
+    #grid {
+      display: grid;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .cell {
+      width: var(--cell-size);
+      height: var(--cell-size);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.06);
+      cursor: pointer;
+      transition: filter 0.1s;
+      position: relative;
+      background: var(--surface);
+      color: var(--muted);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .cell.filled {
+      color: transparent;
+      border-color: rgba(0,0,0,0.2);
+    }
+    .cell.filled::after {
+      display: none;
+    }
+    .cell.wrong-colour {
+      animation: shake 0.3s ease;
+    }
+    .cell.correct-flash {
+      animation: flashIn 0.25s ease forwards;
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25% { transform: translateX(-3px); }
+      75% { transform: translateX(3px); }
+    }
+    @keyframes flashIn {
+      0% { filter: brightness(2.5); }
+      100% { filter: brightness(1); }
+    }
+
+    /* ── PALETTE ── */
+    #palette {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: var(--palette-h);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 10px 12px;
+      gap: 8px;
+      z-index: 10;
+    }
+    #palette-label {
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    #swatches {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+    #swatches::-webkit-scrollbar { display: none; }
+
+    .swatch {
+      min-width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      border: 3px solid transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: 'Space Mono', monospace;
+      transition: transform 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+      position: relative;
+    }
+    .swatch .swatch-num {
+      color: rgba(0,0,0,0.7);
+      text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+      pointer-events: none;
+    }
+    .swatch.selected {
+      border-color: white;
+      transform: scale(1.15) translateY(-3px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    .swatch.exhausted {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    .swatch .tick {
+      position: absolute;
+      top: -6px; right: -6px;
+      width: 16px; height: 16px;
+      background: var(--success);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      color: #000;
+      display: none;
+    }
+    .swatch.exhausted .tick { display: flex; }
+
+    /* ── WIN OVERLAY ── */
+    #win-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,15,20,0.92);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s ease;
+    }
+    #win-overlay.show {
+      opacity: 1;
+      pointer-events: all;
+    }
+    #win-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 36px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #win-sub {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+    #btn-timelapse {
+      padding: 14px 32px;
+      border-radius: 50px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      color: white;
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── TIMELAPSE OVERLAY ── */
+    #timelapse-overlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+    #timelapse-overlay.show { opacity: 1; pointer-events: all; }
+    #tl-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #tl-canvas {
+      image-rendering: pixelated;
+      border-radius: 4px;
+      max-width: 90vw;
+      max-height: 60vh;
+    }
+    #btn-close-tl {
+      padding: 12px 28px;
+      border-radius: 50px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* ── ZOOM HINT ── */
+    #zoom-hint {
+      position: absolute;
+      bottom: calc(var(--palette-h) + 10px);
+      right: 12px;
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      opacity: 1;
+      transition: opacity 1s ease;
+      pointer-events: none;
+    }
+    #zoom-hint.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div id="logo">PixelFill</div>
+  <div id="progress-wrap">
+    <div id="progress-label">Progress</div>
+    <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas-inner">
+    <div id="grid"></div>
+  </div>
+</div>
+
+<div id="zoom-hint">PINCH TO ZOOM · DRAG TO PAN</div>
+
+<div id="palette">
+  <div id="palette-label">Select a colour</div>
+  <div id="swatches"></div>
+</div>
+
+<div id="win-overlay">
+  <div id="win-title">Completed! 🎨</div>
+  <div id="win-sub">You filled every pixel.</div>
+  <button id="btn-timelapse">Watch Timelapse</button>
+</div>
+
+<div id="timelapse-overlay">
+  <div id="tl-label">Timelapse</div>
+  <canvas id="tl-canvas"></canvas>
+  <button id="btn-close-tl">Close</button>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// PUZZLE DEFINITION
+// Each number maps to a colour. 0 = background (skip)
+// ─────────────────────────────────────────────
+const PALETTE = {
+  1: '#FF6B6B', // red
+  2: '#FFD93D', // yellow
+  3: '#6BCB77', // green
+  4: '#4D96FF', // blue
+  5: '#FF6FB0', // pink
+  6: '#C77DFF', // purple
+  7: '#FF9A3C', // orange
+  8: '#FFFFFF', // white
+};
+
+// 16×16 smiley face puzzle
+const PUZZLE_DATA = [
+  [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+  [0,0,0,2,2,2,2,2,2,2,2,2,2,0,0,0],
+  [0,0,2,2,2,2,2,2,2,2,2,2,2,2,0,0],
+  [0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0],
+  [0,2,2,2,1,1,2,2,2,2,1,1,2,2,2,0],
+  [2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+  [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+  [2,2,1,2,2,2,2,2,2,2,2,2,2,1,2,2],
+  [2,2,2,1,2,2,2,2,2,2,2,2,1,2,2,2],
+  [2,2,2,2,1,1,1,1,1,1,1,1,2,2,2,2],
+  [0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0],
+  [0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0],
+  [0,0,2,2,2,2,2,2,2,2,2,2,2,2,0,0],
+  [0,0,0,2,2,2,2,2,2,2,2,2,2,0,0,0],
+  [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+];
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+const ROWS = PUZZLE_DATA.length;
+const COLS = PUZZLE_DATA[0].length;
+let selectedColour = null;
+let filledCells = {}; // "r,c" -> colourNum
+let history = [];     // array of {r,c,colourNum} for timelapse
+
+// total fillable cells
+const totalCells = PUZZLE_DATA.flat().filter(v => v !== 0).length;
+
+// ─────────────────────────────────────────────
+// BUILD GRID
+// ─────────────────────────────────────────────
+const gridEl = document.getElementById('grid');
+gridEl.style.gridTemplateColumns = `repeat(${COLS}, var(--cell-size))`;
+gridEl.style.gridTemplateRows = `repeat(${ROWS}, var(--cell-size))`;
+
+const cellEls = [];
+for (let r = 0; r < ROWS; r++) {
+  cellEls[r] = [];
+  for (let c = 0; c < COLS; c++) {
+    const num = PUZZLE_DATA[r][c];
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    if (num === 0) {
+      cell.style.background = 'transparent';
+      cell.style.border = 'none';
+      cell.style.pointerEvents = 'none';
+    } else {
+      cell.textContent = num;
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      cell.dataset.num = num;
+    }
+    gridEl.appendChild(cell);
+    cellEls[r][c] = cell;
+  }
+}
+
+// ─────────────────────────────────────────────
+// BUILD PALETTE
+// ─────────────────────────────────────────────
+const swatchesEl = document.getElementById('swatches');
+const usedNums = [...new Set(PUZZLE_DATA.flat().filter(v => v !== 0))].sort((a,b)=>a-b);
+
+usedNums.forEach(num => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch';
+  sw.dataset.num = num;
+  sw.style.background = PALETTE[num];
+  sw.innerHTML = `<span class="swatch-num">${num}</span><span class="tick">✓</span>`;
+  sw.addEventListener('click', () => selectColour(num));
+  swatchesEl.appendChild(sw);
+});
+
+function selectColour(num) {
+  selectedColour = num;
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+  const sw = swatchesEl.querySelector(`[data-num="${num}"]`);
+  if (sw) sw.classList.add('selected');
+}
+
+// ─────────────────────────────────────────────
+// FILL LOGIC
+// ─────────────────────────────────────────────
+function fillCell(r, c) {
+  const num = PUZZLE_DATA[r][c];
+  if (!num || filledCells[`${r},${c}`]) return;
+  if (!selectedColour) return;
+
+  const cell = cellEls[r][c];
+
+  if (selectedColour === num) {
+    filledCells[`${r},${c}`] = num;
+    history.push({ r, c, colourNum: num });
+    cell.style.background = PALETTE[num];
+    cell.textContent = '';
+    cell.classList.add('filled', 'correct-flash');
+    setTimeout(() => cell.classList.remove('correct-flash'), 300);
+    updateProgress();
+    checkExhausted(num);
+    checkWin();
+  } else {
+    cell.classList.add('wrong-colour');
+    setTimeout(() => cell.classList.remove('wrong-colour'), 350);
+  }
+}
+
+function updateProgress() {
+  const pct = (Object.keys(filledCells).length / totalCells) * 100;
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+function checkExhausted(num) {
+  const remaining = PUZZLE_DATA.flat().filter((v,i) => {
+    const r = Math.floor(i / COLS), c = i % COLS;
+    return v === num && !filledCells[`${r},${c}`];
+  });
+  if (remaining.length === 0) {
+    const sw = swatchesEl.querySelector(`[data-num="${num}"]`);
+    if (sw) sw.classList.add('exhausted');
+  }
+}
+
+function checkWin() {
+  if (Object.keys(filledCells).length === totalCells) {
+    setTimeout(() => {
+      document.getElementById('win-overlay').classList.add('show');
+    }, 400);
+  }
+}
+
+// ─────────────────────────────────────────────
+// TOUCH / CLICK ON GRID (with drag guard)
+// ─────────────────────────────────────────────
+let pointerMoved = false;
+gridEl.addEventListener('pointerdown', () => { pointerMoved = false; });
+gridEl.addEventListener('pointermove', () => { pointerMoved = true; });
+gridEl.addEventListener('pointerup', e => {
+  if (pointerMoved) return;
+  const cell = e.target.closest('.cell');
+  if (!cell || !cell.dataset.r) return;
+  fillCell(+cell.dataset.r, +cell.dataset.c);
+});
+
+// ─────────────────────────────────────────────
+// PAN & ZOOM (touch + mouse)
+// ─────────────────────────────────────────────
+const wrap = document.getElementById('canvas-wrap');
+const inner = document.getElementById('canvas-inner');
+
+let scale = 1, tx = 0, ty = 0;
+let isDragging = false, lastX = 0, lastY = 0;
+let lastDist = null;
+
+function applyTransform() {
+  const s = Math.max(0.4, Math.min(4, scale));
+  scale = s;
+  inner.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${s})`;
+}
+applyTransform();
+
+// Mouse drag
+wrap.addEventListener('mousedown', e => {
+  isDragging = true; lastX = e.clientX; lastY = e.clientY;
+  wrap.classList.add('grabbing');
+});
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  tx += e.clientX - lastX; ty += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { isDragging = false; wrap.classList.remove('grabbing'); });
+
+// Mouse wheel zoom
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  scale *= e.deltaY < 0 ? 1.1 : 0.9;
+  applyTransform();
+}, { passive: false });
+
+// Touch pan + pinch zoom
+let touches = [];
+wrap.addEventListener('touchstart', e => {
+  touches = [...e.touches];
+  if (touches.length === 1) { lastX = touches[0].clientX; lastY = touches[0].clientY; }
+  if (touches.length === 2) lastDist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+  pointerMoved = false;
+}, { passive: true });
+
+wrap.addEventListener('touchmove', e => {
+  e.preventDefault();
+  pointerMoved = true;
+  touches = [...e.touches];
+  if (touches.length === 1) {
+    tx += touches[0].clientX - lastX; ty += touches[0].clientY - lastY;
+    lastX = touches[0].clientX; lastY = touches[0].clientY;
+    applyTransform();
+  }
+  if (touches.length === 2) {
+    const d = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    if (lastDist) scale *= d / lastDist;
+    lastDist = d;
+    applyTransform();
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchend', e => {
+  touches = [...e.touches];
+  if (touches.length < 2) lastDist = null;
+});
+
+// Hide zoom hint after first interaction
+wrap.addEventListener('touchstart', () => {
+  document.getElementById('zoom-hint').classList.add('hidden');
+}, { once: true });
+
+// ─────────────────────────────────────────────
+// TIMELAPSE
+// ─────────────────────────────────────────────
+document.getElementById('btn-timelapse').addEventListener('click', () => {
+  document.getElementById('win-overlay').classList.remove('show');
+  playTimelapse();
+});
+
+function playTimelapse() {
+  const tlo = document.getElementById('timelapse-overlay');
+  const tlc = document.getElementById('tl-canvas');
+  const PIXEL = 20;
+  tlc.width = COLS * PIXEL;
+  tlc.height = ROWS * PIXEL;
+  const ctx = tlc.getContext('2d');
+
+  // draw background
+  ctx.fillStyle = '#1a1a24';
+  ctx.fillRect(0, 0, tlc.width, tlc.height);
+
+  // draw empty cells (show numbers area)
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const num = PUZZLE_DATA[r][c];
+      if (num) {
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(c * PIXEL, r * PIXEL, PIXEL, PIXEL);
+      }
+    }
+  }
+
+  tlo.classList.add('show');
+
+  let i = 0;
+  const SPEED = 30; // ms per step (faster = speedier timelapse)
+  const BATCH = Math.max(1, Math.floor(history.length / 120)); // compress to ~120 frames
+
+  function step() {
+    for (let b = 0; b < BATCH && i < history.length; b++, i++) {
+      const { r, c, colourNum } = history[i];
+      ctx.fillStyle = PALETTE[colourNum];
+      ctx.fillRect(c * PIXEL, r * PIXEL, PIXEL, PIXEL);
+    }
+    if (i < history.length) setTimeout(step, SPEED);
+  }
+  step();
+}
+
+document.getElementById('btn-close-tl').addEventListener('click', () => {
+  document.getElementById('timelapse-overlay').classList.remove('show');
+  document.getElementById('win-overlay').classList.add('show');
+});
+
+// ─────────────────────────────────────────────
+// SERVICE WORKER REGISTRATION
+// ─────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
