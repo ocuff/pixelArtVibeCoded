@@ -1,4 +1,4 @@
-const CACHE = 'pixelfill-v4';
+const CACHE = 'pixelfill-v5';
 const ASSETS = [
   './',
   './index.html',
