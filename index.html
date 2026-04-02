@@ -28,6 +28,11 @@
     /* HEADER */
     .app-header { height: var(--header-h); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--surface); z-index: 10; }
     .logo { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; cursor: pointer; }
+    
+    /* UPLOAD BUTTON */
+    .btn-upload { background: var(--accent); color: white; border: none; padding: 8px 14px; border-radius: 8px; font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    .btn-upload:active { transform: scale(0.95); }
+
     .btn-back { display: flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted); font-family: 'Space Mono', monospace; font-size: 11px; cursor: pointer; padding: 6px 0; letter-spacing: 0.5px; -webkit-tap-highlight-color: transparent; }
     .btn-back:hover { color: var(--text); }
     .btn-back svg { width: 16px; height: 16px; }
@@ -71,10 +76,7 @@
     #grid { display: grid; border: 2px solid var(--border); border-radius: 4px; overflow: hidden; user-select: none; }
     .cell { width: var(--cell-size); height: var(--cell-size); display: flex; align-items: center; justify-content: center; font-size: 9px; font-family: 'Space Mono', monospace; font-weight: 700; border: 1px solid rgba(255,255,255,0.06); cursor: pointer; position: relative; background: var(--surface); color: var(--muted); -webkit-tap-highlight-color: transparent; }
     .cell.filled { color: transparent; border-color: rgba(0,0,0,0.2); }
-    
-    /* New: Highlighted cells for selected colour */
     .cell.highlight { background: rgba(124, 111, 255, 0.12); box-shadow: inset 0 0 10px rgba(124, 111, 255, 0.25); border-color: rgba(124, 111, 255, 0.4); z-index: 2; }
-    
     .cell.wrong-colour { animation: shake 0.3s ease; }
     .cell.correct-flash { animation: flashIn 0.25s ease forwards; }
     @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
@@ -118,6 +120,11 @@
 <div id="screen-library" class="screen active">
   <div class="app-header">
     <div class="logo">PixelFill</div>
+    <button class="btn-upload" id="btn-upload-trigger">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0-1A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM7.5 5.5v2H5.5v1h2v2h1v-2h2v-1h-2v-2h-1z"/></svg>
+      Create
+    </button>
+    <input type="file" id="image-input" accept="image/*" style="display:none" />
   </div>
   <div id="library-body">
     <div class="lib-greeting">Choose a puzzle</div>
@@ -169,6 +176,13 @@ const PALETTE = {
   6:'#C77DFF', 7:'#FF9A3C', 8:'#FFFFFF', 9:'#1a1a2e', 10:'#A0522D',
   11:'#00CED1', 12:'#F5DEB3', 13:'#708090', 14:'#FFB347', 15:'#98FF98',
 };
+
+// Convert Hex to RGB for color matching
+function hexToRgb(hex) {
+  const bigint = parseInt(hex.slice(1), 16);
+  return [ (bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255 ];
+}
+const PALETTE_RGB = Object.entries(PALETTE).map(([id, hex]) => ({ id: +id, rgb: hexToRgb(hex) }));
 
 // ═══════════════════════════════════
 // PUZZLE LIBRARY
@@ -367,11 +381,10 @@ const LIBRARY = [
   ]},
 ];
 
-const CATEGORY_ICONS = { Shapes:'🔷', Animals:'🐾', Food:'🍕', Space:'🚀', Nature:'🌿', Emoji:'😄', Buildings:'🏰' };
-const categories = {};
-LIBRARY.forEach(p => { if (!categories[p.category]) categories[p.category] = []; categories[p.category].push(p); });
+const CATEGORY_ICONS = { Shapes:'🔷', Animals:'🐾', Food:'🍕', Space:'🚀', Nature:'🌿', Emoji:'😄', Buildings:'🏰', Custom:'🎨' };
 
 let completed = new Set(JSON.parse(localStorage.getItem('pf-completed') || '[]'));
+let customPuzzles = JSON.parse(localStorage.getItem('pf-custom') || '[]');
 
 // ═══════════════════════════════════
 // THUMBNAIL RENDERER
@@ -400,6 +413,10 @@ const libCatsEl = document.getElementById('library-categories');
 
 function buildLibrary() {
   libCatsEl.innerHTML = '';
+  const allPuzzles = [...LIBRARY, ...customPuzzles];
+  const categories = {};
+  allPuzzles.forEach(p => { if (!categories[p.category]) categories[p.category] = []; categories[p.category].push(p); });
+
   Object.entries(categories).forEach(([catName, puzzles]) => {
     const sec = document.createElement('div');
     sec.className = 'category-section';
@@ -425,6 +442,60 @@ function buildLibrary() {
 buildLibrary();
 
 // ═══════════════════════════════════
+// UPLOAD LOGIC
+// ═══════════════════════════════════
+document.getElementById('btn-upload-trigger').onclick = () => document.getElementById('image-input').click();
+document.getElementById('image-input').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      // Limit size to 24px max dimension for gameplay balance
+      const maxDim = 24;
+      let w = img.width, h = img.height;
+      if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+      else { w = Math.round(w * maxDim / h); h = maxDim; }
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      const grid = [];
+      for (let r = 0; r < h; r++) {
+        const row = [];
+        for (let c = 0; c < w; c++) {
+          const idx = (r * w + c) * 4;
+          const [rVal, gVal, bVal, aVal] = [data[idx], data[idx+1], data[idx+2], data[idx+3]];
+          if (aVal < 128) { row.push(0); continue; }
+          // Find closest palette color
+          let best = 1, minD = Infinity;
+          PALETTE_RGB.forEach(p => {
+            const d = Math.sqrt((rVal-p.rgb[0])**2 + (gVal-p.rgb[1])**2 + (bVal-p.rgb[2])**2);
+            if (d < minD) { minD = d; best = p.id; }
+          });
+          row.push(best);
+        }
+        grid.push(row);
+      }
+      const newPuzzle = {
+        id: 'custom-' + Date.now(),
+        name: file.name.split('.')[0],
+        category: 'Custom',
+        difficulty: 'medium',
+        grid: grid
+      };
+      customPuzzles.push(newPuzzle);
+      localStorage.setItem('pf-custom', JSON.stringify(customPuzzles));
+      buildLibrary();
+    };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+// ═══════════════════════════════════
 // SCREEN NAV
 // ═══════════════════════════════════
 function showScreen(id) {
@@ -443,8 +514,7 @@ let currentPuzzleId=null;
 const RING_R=24, RING_CIRC=2*Math.PI*RING_R;
 
 function resetGame() {
-  filledCells={}; selectedColour=null;
-  history=[];
+  filledCells={}; selectedColour=null; history=[];
   document.getElementById('progress-bar').style.width='0%';
   document.getElementById('win-overlay').classList.remove('show');
   document.getElementById('timelapse-overlay').classList.remove('show');
@@ -511,17 +581,13 @@ function buildPalette() {
   });
 }
 
-// Updated: Added logic to highlight cells of the selected color
 function selectColour(num) {
   selectedColour = num;
   document.querySelectorAll('.swatch-wrap').forEach(s => s.classList.remove('selected'));
   swatchesEl.querySelector(`.swatch-wrap[data-num="${num}"]`)?.classList.add('selected');
-
   document.querySelectorAll('.cell').forEach(cell => {
     cell.classList.remove('highlight');
-    if (cell.dataset.num == num && !filledCells[`${cell.dataset.r},${cell.dataset.c}`]) {
-      cell.classList.add('highlight');
-    }
+    if (cell.dataset.num == num && !filledCells[`${cell.dataset.r},${cell.dataset.c}`]) cell.classList.add('highlight');
   });
 }
 
@@ -532,33 +598,23 @@ function updateRing(num) {
 }
 
 // ═══════════════════════════════════
-// FILL
+// FILL & INTERACTION
 // ═══════════════════════════════════
 let isFillDragging=false;
 
-// Updated: Added highlight removal
 function fillCell(r, c) {
   const num = PUZZLE_DATA[r][c];
   if (!num || filledCells[`${r},${c}`] || !selectedColour) return;
   const cell = cellEls[r][c];
-  
   if (selectedColour === num) {
     filledCells[`${r},${c}`] = num; 
     history.push({r, c, colourNum: num});
-    cell.style.background = PALETTE[num]; 
-    cell.textContent = '';
-    cell.classList.remove('highlight'); 
-    cell.classList.add('filled', 'correct-flash');
-    
+    cell.style.background = PALETTE[num]; cell.textContent = '';
+    cell.classList.remove('highlight'); cell.classList.add('filled', 'correct-flash');
     setTimeout(() => cell.classList.remove('correct-flash'), 300);
     document.getElementById('progress-bar').style.width = (Object.keys(filledCells).length / totalCells * 100) + '%';
     updateRing(num);
-    
-    const rem = PUZZLE_DATA.flat().filter((v, i) => { 
-      const rr = Math.floor(i / COLS), cc = i % COLS; 
-      return v === num && !filledCells[`${rr},${cc}`]; 
-    });
-    
+    const rem = PUZZLE_DATA.flat().filter((v, i) => { const rr = Math.floor(i / COLS), cc = i % COLS; return v === num && !filledCells[`${rr},${cc}`]; });
     if (!rem.length) swatchesEl.querySelector(`.swatch-wrap[data-num="${num}"]`)?.classList.add('exhausted');
     if (Object.keys(filledCells).length === totalCells) {
       completed.add(currentPuzzleId);
@@ -571,9 +627,6 @@ function fillCell(r, c) {
   }
 }
 
-// ═══════════════════════════════════
-// IMPROVED PAN & FILL LOGIC
-// ═══════════════════════════════════
 const wrap=document.getElementById('canvas-wrap');
 const inner=document.getElementById('canvas-inner');
 let scale=1,tx=0,ty=0,isDragging=false,lastX=0,lastY=0,lastDist=null,activePanTouch=null;
@@ -583,23 +636,14 @@ function applyTransform() {
   inner.style.transform=`translate(calc(-50% + ${tx}px),calc(-50% + ${ty}px)) scale(${scale})`;
 }
 
-// Unified Mouse interaction
+// Interaction logic
 wrap.addEventListener('mousedown', e => {
   const cell = e.target.closest('.cell');
-  const isTarget = cell && +cell.dataset.num === selectedColour && !filledCells[`${cell.dataset.r},${cell.dataset.c}`];
-  
-  if (isTarget) {
-    isFillDragging = true;
-    fillCell(+cell.dataset.r, +cell.dataset.c);
-    return;
+  if (cell && +cell.dataset.num === selectedColour && !filledCells[`${cell.dataset.r},${cell.dataset.c}`]) {
+    isFillDragging = true; fillCell(+cell.dataset.r, +cell.dataset.c); return;
   }
-
-  isDragging = true; 
-  lastX = e.clientX; 
-  lastY = e.clientY; 
-  wrap.classList.add('grabbing');
+  isDragging = true; lastX = e.clientX; lastY = e.clientY; wrap.classList.add('grabbing');
 });
-
 window.addEventListener('mousemove', e => {
   if (isFillDragging) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -607,93 +651,33 @@ window.addEventListener('mousemove', e => {
     if (cell?.dataset.r) fillCell(+cell.dataset.r, +cell.dataset.c);
     return;
   }
-  
   if (!isDragging) return;
-  tx += e.clientX - lastX; 
-  lastY = e.clientY; 
-  tx += e.clientX - lastX; 
-  ty += e.clientY - lastY; 
-  lastX = e.clientX; 
-  lastY = e.clientY; 
-  applyTransform();
-
-  // Multi-fill while panning
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  const cell = el?.closest('.cell');
-  if (cell?.dataset.r) fillCell(+cell.dataset.r, +cell.dataset.c);
+  tx += e.clientX - lastX; ty += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; applyTransform();
 });
+window.addEventListener('mouseup', () => { isDragging = false; isFillDragging = false; wrap.classList.remove('grabbing'); });
 
-window.addEventListener('mouseup', () => { 
-  isDragging = false; 
-  isFillDragging = false;
-  wrap.classList.remove('grabbing'); 
-});
-
-// Unified Touch interaction
 wrap.addEventListener('touchstart', e => {
-  if (e.touches.length === 2) { 
-    lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); 
-    activePanTouch = null; 
-    return; 
-  }
-  
-  const t = e.touches[0]; 
-  const el = document.elementFromPoint(t.clientX, t.clientY);
-  const targetCell = el?.closest('.cell');
-  const isTarget = targetCell && +targetCell.dataset.num === selectedColour && !filledCells[`${targetCell.dataset.r},${targetCell.dataset.c}`];
-
-  if (isTarget) {
-    isFillDragging = true;
-    fillCell(+targetCell.dataset.r, +targetCell.dataset.c);
-  } else { 
-    activePanTouch = t.identifier; 
-    lastX = t.clientX; 
-    lastY = t.clientY; 
-  }
+  if (e.touches.length === 2) { lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); activePanTouch = null; return; }
+  const t = e.touches[0]; const el = document.elementFromPoint(t.clientX, t.clientY);
+  const cell = el?.closest('.cell');
+  if (cell && +cell.dataset.num === selectedColour && !filledCells[`${cell.dataset.r},${cell.dataset.c}`]) {
+    isFillDragging = true; fillCell(+cell.dataset.r, +cell.dataset.c);
+  } else { activePanTouch = t.identifier; lastX = t.clientX; lastY = t.clientY; }
 }, {passive: true});
-
 wrap.addEventListener('touchmove', e => {
-  if (e.touches.length === 2) { 
-    e.preventDefault();
-    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); 
-    if (lastDist) scale *= d / lastDist; 
-    lastDist = d; 
-    applyTransform(); 
-    return; 
-  }
-  
+  if (e.touches.length === 2) { e.preventDefault(); const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (lastDist) scale *= d / lastDist; lastDist = d; applyTransform(); return; }
   if (isFillDragging) {
-    const t = e.touches[0];
-    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const t = e.touches[0]; const el = document.elementFromPoint(t.clientX, t.clientY);
     const cell = el?.closest('.cell');
     if (cell?.dataset.r) fillCell(+cell.dataset.r, +cell.dataset.c);
     return;
   }
-
   if (activePanTouch === null) return;
-  const t = [...e.touches].find(t => t.identifier === activePanTouch); 
-  if (!t) return;
-  
-  e.preventDefault();
-  tx += t.clientX - lastX; 
-  ty += t.clientY - lastY; 
-  lastX = t.clientX; 
-  lastY = t.clientY; 
-  applyTransform();
-
-  const el = document.elementFromPoint(t.clientX, t.clientY);
-  const cell = el?.closest('.cell');
-  if (cell?.dataset.r) fillCell(+cell.dataset.r, +cell.dataset.c);
+  const t = [...e.touches].find(t => t.identifier === activePanTouch); if (!t) return;
+  e.preventDefault(); tx += t.clientX - lastX; ty += t.clientY - lastY; lastX = t.clientX; lastY = t.clientY; applyTransform();
 }, {passive: false});
-
-wrap.addEventListener('touchend',e=>{ 
-  if(e.touches.length<2)lastDist=null; 
-  if(![...e.touches].find(t=>t.identifier===activePanTouch))activePanTouch=null; 
-  isFillDragging = false;
-});
-
+wrap.addEventListener('touchend',e=>{ if(e.touches.length<2)lastDist=null; if(![...e.touches].find(t=>t.identifier===activePanTouch))activePanTouch=null; isFillDragging = false; });
 wrap.addEventListener('wheel',e=>{ e.preventDefault(); scale*=e.deltaY<0?1.1:0.9; applyTransform(); },{passive:false});
-wrap.addEventListener('touchstart',()=>document.getElementById('zoom-hint').classList.add('hidden'),{once:true});
 
 // ═══════════════════════════════════
 // WIN + TIMELAPSE
@@ -720,7 +704,6 @@ function playTimelapse() {
   step();
 }
 
-// SERVICE WORKER
 if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>
 </body>
