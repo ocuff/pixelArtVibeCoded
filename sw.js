@@ -1,6 +1,4 @@
-// Bumping the version from v1 to v2 forces the browser to 
-// clear the old cache and download your updated index.html
-const CACHE = 'pixelfill-v2'; 
+const CACHE = 'pixelfill-v2';
 const ASSETS = [
   './',
   './index.html',
